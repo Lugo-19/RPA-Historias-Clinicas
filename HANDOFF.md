@@ -266,6 +266,16 @@ PyInstaller) · `browser\` (Chromium de Playwright, ~300 MB) · `config.json` ·
 - ⚠️ La contraseña de BD queda en texto plano en `config.json` (decisión de comodidad).
   `config.json` está en `.gitignore`; se versiona solo `config.json.example`.
 
+**⚠️ Gotchas críticos del empaquetado (NO romper):**
+1. **pkg debe ir `--no-bytecode --public --public-packages "*"`**. Por defecto pkg compila el
+   JS a bytecode V8, lo que **rompe `page.evaluate()` de Playwright** con
+   `Passed function is not well-serializable!` (Playwright necesita el código FUENTE de la
+   función). Sin esto, el `.exe` falla en el primer tab (Anamnesis) y la ventana se cierra.
+2. **NO usar rcedit sobre el `.exe` de pkg.** rcedit reescribe la sección de recursos y
+   **desplaza el payload** que pkg appende al final → `Pkg: Error reading from file` (no abre).
+   El ícono/nombre se aplican vía el instalador y los accesos directos (`installer.iss` apunta
+   a `icono.ico`), sin tocar el binario.
+
 **Cómo construir el entregable:**
 ```powershell
 npm run build      # = powershell -File build\build.ps1
