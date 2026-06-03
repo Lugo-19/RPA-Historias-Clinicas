@@ -98,9 +98,16 @@ Copy-Item $chromiumRoot -Destination $browserDest -Recurse
 Write-Host ("  Chromium copiado: " + (Split-Path -Leaf $chromiumRoot))
 
 # 4. Archivos de configuracion y ayuda
+# Usa config.local.json (REAL, con la clave, ignorado por git) si existe;
+# si no, cae al config.json.example (placeholder, versionado).
 Write-Host "`n[4/6] Copiando config.json y LEEME..." -ForegroundColor Yellow
-Copy-Item (Join-Path $proj 'config.json.example') (Join-Path $dist 'config.json')
-Copy-Item (Join-Path $proj 'LEEME.txt')           (Join-Path $dist 'LEEME.txt') -ErrorAction SilentlyContinue
+$cfgFuente = Join-Path $proj 'config.local.json'
+if (-not (Test-Path $cfgFuente)) {
+  $cfgFuente = Join-Path $proj 'config.json.example'
+  Write-Warning "No hay config.local.json; el config empaquetado saldra con el placeholder de clave."
+}
+Copy-Item $cfgFuente (Join-Path $dist 'config.json')
+Copy-Item (Join-Path $proj 'LEEME.txt') (Join-Path $dist 'LEEME.txt') -ErrorAction SilentlyContinue
 
 # 5. Instalador con Inno Setup (opcional)
 Write-Host "`n[5/6] Generando instalador (Inno Setup)..." -ForegroundColor Yellow
