@@ -1,0 +1,17 @@
+{
+  "name": "hchealth-rpa",
+  "version": "1.0.0",
+  "description": "RPA automatizado para pruebas de HCHealth",
+  "main": "rpa.js",
+  "scripts": {
+    "start": "node rpa.js"
+  },
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "dotenv": "^17.4.2",
+    "mssql": "^12.5.5",
+    "ora": "^5.4.1",
+    "playwright": "^1.44.0",
+    "prompts": "^2.4.2"
+  }
+}
