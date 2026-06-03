@@ -17,7 +17,39 @@ const fs   = require('fs');
 const prompts = require('prompts');
 const cfg  = require('./config');
 const ui   = require('./ui');
+const logger = require('./logger');
 const { generarCita, citaIdToBase64 } = require('./db');
+
+// ── Sistema de logs a archivo (diagnóstico) ──────────────────
+// Se guarda en <carpetaSalida>\logs\ (o junto al .exe como respaldo).
+// Escritura síncrona: aunque el .exe se cuelgue/cierre, la última
+// acción queda registrada. Imprescindible para el modo doble clic.
+const rutaLog = logger.init([
+  path.join(cfg.carpetaSalida || '', 'logs'),
+  path.join(cfg.dirApp || __dirname, 'logs'),
+]);
+logger.hookConsola();
+logger.write(`empaquetado=${cfg.empaquetado} | dirApp=${cfg.dirApp} | carpetaSalida=${cfg.carpetaSalida}`);
+
+// Cualquier error no controlado queda en el log (no se pierde al cerrarse la ventana).
+process.on('uncaughtException', (e) => {
+  logger.write('uncaughtException:', e && e.stack ? e.stack : e);
+});
+process.on('unhandledRejection', (r) => {
+  logger.write('unhandledRejection:', r && r.stack ? r.stack : r);
+});
+
+// Pausa la consola (solo empaquetado) para que el usuario alcance a leer
+// el error antes de que la ventana se cierre.
+function esperarTecla() {
+  return new Promise((res) => {
+    try {
+      process.stdout.write('\n  Presiona ENTER para cerrar...');
+      const rl = require('readline').createInterface({ input: process.stdin, output: process.stdout });
+      rl.question('', () => { rl.close(); res(); });
+    } catch (_) { res(); }
+  });
+}
 
 // ── Utilidades ────────────────────────────────────────────────
 
@@ -86,11 +118,14 @@ async function esperarPaginaLista(page) {
 // ── Tomar captura de pantalla ────────────────────────────────
 
 async function tomarCaptura(page, rutaArchivo, segundaCaptura = false) {
+  logger.write('tomarCaptura -> inicio:', rutaArchivo);
   // Scroll al inicio
   await page.keyboard.press('Control+Home');
   await page.waitForTimeout(300);
 
-  await page.screenshot({ path: rutaArchivo, fullPage: false });
+  logger.write('  page.screenshot... (timeout 20s)');
+  await page.screenshot({ path: rutaArchivo, fullPage: false, timeout: 20000 });
+  logger.write('  screenshot OK:', rutaArchivo);
   log(`Captura: ${path.basename(rutaArchivo)}`, 'ok');
 
   // Segunda captura (scroll) para tabs muy largos
@@ -98,7 +133,8 @@ async function tomarCaptura(page, rutaArchivo, segundaCaptura = false) {
     await page.keyboard.press('PageDown');
     await page.waitForTimeout(700);
     const rutaScroll = rutaArchivo.replace('.png', '_scroll.png');
-    await page.screenshot({ path: rutaScroll, fullPage: false });
+    await page.screenshot({ path: rutaScroll, fullPage: false, timeout: 20000 });
+    logger.write('  screenshot scroll OK:', rutaScroll);
     log(`Captura scroll: ${path.basename(rutaScroll)}`, 'ok');
     // Volver arriba
     await page.keyboard.press('Control+Home');
@@ -623,14 +659,17 @@ async function capturarPanelesPYM(page, carpetaRun, tabIndex, tabNombreClean) {
       carpetaRun,
       `${String(tabIndex).padStart(2, '0')}_${tabNombreClean}__${String(p.i + 1).padStart(2, '0')}_${tituloLimpio}.png`
     );
+    logger.write(`  panel ${p.i + 1}/${paneles.length}: "${p.titulo}"`);
     try {
       await loc.scrollIntoViewIfNeeded({ timeout: 3000 });
       await page.waitForTimeout(200);
       await cerrarAlertas(page);                 // descartar alertas clínicas residuales
       await loc.screenshot({ path: ruta, timeout: 5000 });
-    } catch {
+      logger.write('    panel screenshot OK');
+    } catch (e) {
       // Fallback: captura de viewport (mejor algo que nada).
-      try { await page.screenshot({ path: ruta }); } catch { continue; }
+      logger.write('    panel screenshot FALLO, fallback viewport:', e && e.message ? e.message : e);
+      try { await page.screenshot({ path: ruta, timeout: 15000 }); } catch (e2) { logger.write('    fallback tambien fallo:', e2 && e2.message); continue; }
     }
     log(`Captura panel: ${path.basename(ruta)}`, 'ok');
     evidencias.push({ titulo: p.titulo, ruta });
@@ -819,13 +858,16 @@ async function recorrerTabs(page, carpetaRun, modulo, run, encId, logs, programa
     let manejadoPYM = false;  // true = ya se registraron filas panel-por-panel
 
     try {
+      logger.write(`tab ${tabIndex} "${tabNombreRaw}": click`);
       await tabEl.click();
       await esperarPaginaLista(page);
 
       // Rellenar campos con datos de prueba (si está activado en config)
       if (cfg.rellenarCampos) {
+        logger.write(`tab ${tabIndex}: rellenando campos...`);
         await rellenarCampos(page);
         await page.waitForTimeout(400); // dejar que Angular procese
+        logger.write(`tab ${tabIndex}: campos rellenados`);
 
         // Auditar campos que quedan inválidos
         const invalidos = await auditarInvalidos(page);
@@ -835,7 +877,9 @@ async function recorrerTabs(page, carpetaRun, modulo, run, encId, logs, programa
       }
 
       // Detectar error de backend (SweetAlert "OK") antes de capturar.
+      logger.write(`tab ${tabIndex}: detectando error de app...`);
       const errorApp = await detectarErrorApp(page);
+      logger.write(`tab ${tabIndex}: errorApp=${errorApp.hayError}; capturando evidencia...`);
 
       // ── Rama PYM: una fila por panel del acordeón ──
       const esPYM = cfg.evidenciaPanelPorPanelPYM && esTabPYM(tabNombreRaw, programasPYM);
@@ -1237,13 +1281,17 @@ function generarReporteExcel(logs, carpetaBase, datos) {
       process.exit(1);
     }
 
+    logger.write('Generando cita para PacienteId', pacienteId);
     const sp = ui.spinner(`Generando cita para PacienteId ${pacienteId}...`);
     try {
       citaIdInt = await generarCita(connStr, pacienteId);
       citaId = citaIdToBase64(citaIdInt);
       sp.succeed(`Cita generada: Id ${citaIdInt} → ${citaId}`);
+      logger.write('Cita generada OK:', citaIdInt, '->', citaId);
     } catch (e) {
       sp.fail('No se pudo generar la cita: ' + e.message);
+      logger.write('FALLO al generar cita:', e && e.stack ? e.stack : e);
+      if (cfg.empaquetado) await esperarTecla();
       process.exit(1);
     }
   } else {
@@ -1265,8 +1313,11 @@ function generarReporteExcel(logs, carpetaBase, datos) {
     const chromePath = buscarChromeEmpaquetado();
     if (chromePath) lanzaOpts.executablePath = chromePath;
     else log('No se encontró Chromium en la carpeta "browser"; intentando el del sistema', 'warn');
+    logger.write('Chromium executablePath:', lanzaOpts.executablePath || '(del sistema)');
   }
+  logger.write('Lanzando Chromium...');
   const browser = await chromium.launch(lanzaOpts);
+  logger.write('Chromium lanzado OK');
   const context = await browser.newContext({ viewport: null, locale: 'es-CO' });
 
   // Inyectar cookies de sesión cuando la URL NO es local (la app lee
@@ -1307,7 +1358,9 @@ function generarReporteExcel(logs, carpetaBase, datos) {
 
   // ── Ejecutar cada módulo ─────────────────────────────────────
   for (const mod of modulos) {
+    logger.write(`>>> Módulo ${mod.modulo} | URL ${mod.url}`);
     await ejecutarModulo(page, { ...mod, carpetaBase }, logs);
+    logger.write(`<<< Módulo ${mod.modulo} terminado`);
   }
 
   // ── Generar reportes ─────────────────────────────────────────
@@ -1342,4 +1395,17 @@ function generarReporteExcel(logs, carpetaBase, datos) {
     html: path.basename(rutaHTML),
   });
 
-})();
+  logger.write('===== Corrida finalizada OK =====');
+  if (rutaLog) log(`Log de la corrida: ${rutaLog}`, 'ok');
+
+})().catch(async (e) => {
+  // Error fatal no atrapado en el flujo: dejar rastro y NO cerrar la ventana
+  // de golpe para que el usuario (modo doble clic) alcance a verlo.
+  const detalle = e && e.stack ? e.stack : String(e);
+  logger.write('===== ERROR FATAL =====');
+  logger.write(detalle);
+  try { log('ERROR FATAL: ' + (e && e.message ? e.message : e), 'error'); } catch (_) {}
+  if (rutaLog) { try { log('Revisa el log: ' + rutaLog, 'warn'); } catch (_) {} }
+  if (cfg.empaquetado) await esperarTecla();
+  process.exit(1);
+});

@@ -18,7 +18,8 @@
     "scripts": [
       "config.js",
       "db.js",
-      "ui.js"
+      "ui.js",
+      "logger.js"
     ]
   },
   "dependencies": {
