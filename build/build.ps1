@@ -45,8 +45,13 @@ if (Test-Path $pngIcon) {
 }
 
 # 1. Bundle del RPA (Node -> .exe) con @yao-pkg/pkg
-Write-Host "`n[1/6] Empaquetando rpa.js con @yao-pkg/pkg..." -ForegroundColor Yellow
-npx --yes @yao-pkg/pkg . --targets node22-win-x64 --output (Join-Path $dist 'RPA-HCHealth.exe')
+# IMPORTANTE: --no-bytecode --public. pkg por defecto compila el JS a bytecode
+# V8, y eso ROMPE las funciones pasadas a page.evaluate() de Playwright
+# ("Passed function is not well-serializable!"), porque Playwright necesita el
+# codigo FUENTE de la funcion para enviarla al navegador. Sin bytecode el .exe
+# es algo mas grande y el JS queda legible, pero page.evaluate funciona.
+Write-Host "`n[1/6] Empaquetando rpa.js con @yao-pkg/pkg (sin bytecode)..." -ForegroundColor Yellow
+npx --yes @yao-pkg/pkg . --targets node22-win-x64 --no-bytecode --public --public-packages "*" --output (Join-Path $dist 'RPA-HCHealth.exe')
 if (-not (Test-Path (Join-Path $dist 'RPA-HCHealth.exe'))) { throw "pkg no genero el .exe" }
 # IMPORTANTE: NO usar rcedit sobre el .exe de pkg. rcedit reescribe la seccion de
 # recursos (icono/version) y DESPLAZA el payload que pkg appende al final del
