@@ -4,7 +4,38 @@
 //  Solo necesitas cambiar los números de los IDs (citaId).
 // ============================================================
 
+const path = require('path');
+const fs   = require('fs');
+
+// ── Detección de modo empaquetado (.exe via pkg) ────────────
+// Cuando el RPA corre como .exe, `__dirname` apunta al snapshot virtual
+// (/snapshot/...), NO al disco. Los assets externos (Chromium, reporte.exe)
+// y la carpeta de salida deben anclarse a la carpeta del .exe real.
+const EMPAQUETADO = !!process.pkg;
+const DIR_APP = EMPAQUETADO ? path.dirname(process.execPath) : __dirname;
+
+// ── Overrides externos: config.json junto al .exe ───────────
+// Permite al usuario final editar conexión a BD, URL, paciente, etc. sin
+// recompilar. En desarrollo es opcional (se usa .env / estos defaults).
+let externo = {};
+try {
+  const rutaCfg = path.join(DIR_APP, 'config.json');
+  if (fs.existsSync(rutaCfg)) {
+    // Quitar BOM: Notepad/PowerShell suelen guardar UTF-8 con BOM y eso
+    // rompe JSON.parse ("Unexpected token '﻿'").
+    const txt = fs.readFileSync(rutaCfg, 'utf8').replace(/^﻿/, '');
+    externo = JSON.parse(txt) || {};
+  }
+} catch (e) {
+  console.error('Aviso: no se pudo leer config.json — ' + e.message);
+}
+
 module.exports = {
+
+  // ── Rutas/entorno de ejecución (calculadas, no editar) ──────
+  empaquetado: EMPAQUETADO,
+  dirApp: DIR_APP,
+  externo,
 
   // ── Reporte QA Checklist (encabezado del Excel) ─────────────
   reporte: {
@@ -71,8 +102,11 @@ module.exports = {
   },
 
   // ── Carpeta donde se guardan las capturas y el reporte ──────
-  // Se crea automáticamente si no existe.
-  carpetaSalida: 'C:\\HCHealth_RPA_Output',
+  // Se crea automáticamente si no existe. Prioridad:
+  //   1) config.json (carpetaSalida)  2) empaquetado → "Salidas" junto al .exe
+  //   3) desarrollo → C:\HCHealth_RPA_Output
+  carpetaSalida: externo.carpetaSalida
+    || (EMPAQUETADO ? path.join(DIR_APP, 'Salidas') : 'C:\\HCHealth_RPA_Output'),
 
   // ── ¿Rellenar campos automáticamente antes de capturar? ─────
   // true  = el robot escribe datos de prueba en cada campo

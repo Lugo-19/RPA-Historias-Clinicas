@@ -1,0 +1,13 @@
+{
+  "_ayuda": "Copia este archivo como config.json (sin .example) junto a RPA-HCHealth.exe y edita los valores. La contraseña queda en texto plano: no compartas este archivo.",
+
+  "dbConnection": "Data Source=192.168.200.89;Initial Catalog=db_everest_900440054_test;User ID=desarrollo;Password=PON_AQUI_LA_CLAVE",
+  "pacienteId": 80420,
+
+  "baseUrl": "http://localhost:4200",
+
+  "cliente": "NEPS",
+  "desarrollador": "",
+
+  "carpetaSalida": ""
+}

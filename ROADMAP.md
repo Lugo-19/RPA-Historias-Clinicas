@@ -69,6 +69,16 @@ Mensaje sugerido de inicio:
   en una corrida.
 - [ ] **Selección de módulo a ejecutar** desde prompt/config (hoy fijo Morbilidad).
 
+- [x] **Empaquetado como herramienta autónoma (.exe)** — ✅ build verificado.
+  `npm run build` genera `release\RPA-HCHealth-Setup.exe` (~175 MB, instalador Inno Setup;
+  `dist\` portátil de ~563 MB). Corre sin Node/Python: `config.js`/`rpa.js` detectan
+  `process.pkg` y usan `config.json` (tolera BOM) + `reporte.exe` (PyInstaller) + Chromium
+  en `browser\`; consola en UTF-8 (`chcp 65001`). Smoke test del .exe OK (arranca, lee
+  config, sale limpio sin BD). Ver HANDOFF.md §13.
+  - [ ] **Pendiente**: probar el instalador en una máquina **limpia** (sin Node/Python),
+    con la app Angular y la BD accesibles, y correr el flujo completo (cita → llenado →
+    guardado → impresiones → Excel) end-to-end desde el .exe.
+
 ## Prioridad BAJA
 
 - [ ] **Fallback de rasterización PDF** (PyMuPDF) por si alguna captura del visor

@@ -1,0 +1,51 @@
+============================================================
+  RPA HCHealth — Pruebas automáticas de Historia Clínica
+============================================================
+
+¿QUÉ ES?
+Un robot que abre la Historia Clínica de Morbilidad, la llena con datos de
+prueba, la guarda, imprime los documentos y genera un reporte Excel con
+evidencias. No necesitas instalar Node ni Python: todo viene incluido.
+
+------------------------------------------------------------
+ANTES DE LA PRIMERA EJECUCIÓN
+------------------------------------------------------------
+1) Abre "config.json" (Bloc de notas) y revisa:
+     - dbConnection : cadena de conexión a SQL Server (incluye la contraseña).
+     - pacienteId   : el paciente de prueba (por defecto 80420).
+     - baseUrl      : URL de la app (por defecto http://localhost:4200).
+   Guarda los cambios.
+
+   * IMPORTANTE: config.json contiene la contraseña de la base de datos.
+     No lo compartas ni lo subas a ningún lado.
+
+2) Asegúrate de que la aplicación HCHealth esté corriendo y accesible
+   en la URL configurada, y que la base de datos sea alcanzable desde
+   esta máquina (red/VPN).
+
+------------------------------------------------------------
+CÓMO USARLO
+------------------------------------------------------------
+- Doble clic en "RPA-HCHealth.exe".
+- Se abre una ventana de consola. Confirma los datos (Enter acepta el valor
+  por defecto) y elige los programas PYM a activar.
+- El robot abre el navegador y trabaja solo. Al terminar deja el navegador
+  abierto para que revises; ciérralo cuando quieras.
+
+------------------------------------------------------------
+RESULTADOS
+------------------------------------------------------------
+Se guardan en la carpeta "Salidas\<fecha>\" (junto al programa), salvo que
+hayas definido otra ruta en "carpetaSalida" dentro de config.json:
+   - Capturas PNG por cada tab y por cada impresión (PDF).
+   - Listado_Pruebas_HC_<fecha>.xlsx  (reporte QA con evidencias y dashboard).
+   - Reporte_<fecha>.html             (vista rápida).
+
+------------------------------------------------------------
+PROBLEMAS FRECUENTES
+------------------------------------------------------------
+- "No hay cadena de conexión": falta dbConnection en config.json.
+- No conecta a localhost:4200: la app no está corriendo, o no es accesible.
+- El Excel muestra fórmulas raras: ábrelo en Excel real (se recalculan solo).
+- El programa "no termina": es normal, el navegador queda abierto a propósito.
+  Ciérralo para finalizar.

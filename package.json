@@ -3,8 +3,23 @@
   "version": "1.0.0",
   "description": "RPA automatizado para pruebas de HCHealth",
   "main": "rpa.js",
+  "bin": "rpa.js",
   "scripts": {
-    "start": "node rpa.js"
+    "start": "node rpa.js",
+    "build": "powershell -ExecutionPolicy Bypass -File build/build.ps1"
+  },
+  "pkg": {
+    "targets": ["node22-win-x64"],
+    "outputPath": "dist",
+    "assets": [
+      "node_modules/playwright/**/*",
+      "node_modules/playwright-core/**/*"
+    ],
+    "scripts": [
+      "config.js",
+      "db.js",
+      "ui.js"
+    ]
   },
   "dependencies": {
     "chalk": "^4.1.2",

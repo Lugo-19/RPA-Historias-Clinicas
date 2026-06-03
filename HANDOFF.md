@@ -242,3 +242,36 @@ node -e "require('dotenv').config(); const {generarCita,citaIdToBase64}=require(
 # Regenerar el Excel a partir de un reporte_data.json existente
 python reporte.py "<ruta>\reporte_data.json" "<ruta>\salida.xlsx"
 ```
+
+---
+
+## 13. Empaquetado / distribución (herramienta autónoma)
+
+El RPA puede empaquetarse en un entregable que corre **sin instalar Node ni Python**.
+El usuario final recibe **un instalador** (`RPA-HCHealth-Setup.exe`, Inno Setup) que
+despliega una carpeta con:
+`RPA-HCHealth.exe` (rpa.js vía `@yao-pkg/pkg`) · `reporte.exe` (reporte.py vía
+PyInstaller) · `browser\` (Chromium de Playwright, ~300 MB) · `config.json` · `LEEME.txt`.
+
+**Cómo el código detecta el modo empaquetado** (sin romper `node rpa.js` en dev):
+- `config.js` expone `empaquetado` (`!!process.pkg`) y `dirApp`
+  (`path.dirname(process.execPath)` cuando empaquetado, si no `__dirname`).
+- `config.js` carga overrides desde `config.json` (junto al .exe) → `cfg.externo`
+  (`dbConnection`, `pacienteId`, `baseUrl`, `cliente`, `desarrollador`, `carpetaSalida`).
+  `rpa.js` los usa como fallback de `.env`: `process.env.X || cfg.externo.X || default`.
+- `carpetaSalida` por defecto: empaquetado → `Salidas\` junto al .exe; dev → `C:\HCHealth_RPA_Output`.
+- **Reporte**: empaquetado spawnea `reporte.exe`; dev sigue usando `python reporte.py`.
+- **Chromium**: empaquetado usa `executablePath` localizando `chrome.exe` bajo `browser\`
+  (`buscarChromeEmpaquetado` en `rpa.js`); dev usa el del caché de Playwright.
+- ⚠️ La contraseña de BD queda en texto plano en `config.json` (decisión de comodidad).
+  `config.json` está en `.gitignore`; se versiona solo `config.json.example`.
+
+**Cómo construir el entregable:**
+```powershell
+npm run build      # = powershell -File build\build.ps1
+```
+Requisitos en la máquina de **build** (no en la del usuario): Node 22, Python +
+`pyinstaller`/`openpyxl`/`Pillow`, Chromium de Playwright instalado, e Inno Setup 6
+(opcional; sin él, `dist\` queda como carpeta portátil para comprimir en .zip).
+Archivos: `build\build.ps1` (orquesta pkg + PyInstaller + copia de Chromium + Inno),
+`build\installer.iss` (definición del instalador), `config.json.example`, `LEEME.txt`.

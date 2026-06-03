@@ -4,6 +4,13 @@
 // ============================================================
 
 require('dotenv').config();
+
+// Consola en UTF-8 para que el banner y acentos se vean bien (sobre todo en
+// el .exe empaquetado lanzado por doble clic, donde la consola usa cp850/1252).
+if (process.platform === 'win32') {
+  try { require('child_process').execSync('chcp 65001', { stdio: 'ignore' }); } catch {}
+}
+
 const { chromium } = require('playwright');
 const path = require('path');
 const fs   = require('fs');
@@ -35,6 +42,26 @@ function limpiarNombre(texto) {
 
 function crearCarpeta(ruta) {
   if (!fs.existsSync(ruta)) fs.mkdirSync(ruta, { recursive: true });
+}
+
+// Localiza chrome.exe dentro de la carpeta "browser\" empaquetada junto al
+// .exe (pkg no incluye el navegador; se distribuye al lado). Busca recursivo
+// porque el nombre de la subcarpeta de Chromium varía con la versión.
+function buscarChromeEmpaquetado() {
+  const base = path.join(cfg.dirApp, 'browser');
+  if (!fs.existsSync(base)) return null;
+  const pila = [base];
+  while (pila.length) {
+    const dir = pila.pop();
+    let entradas;
+    try { entradas = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    for (const e of entradas) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) pila.push(p);
+      else if (e.name.toLowerCase() === 'chrome.exe') return p;
+    }
+  }
+  return null;
 }
 
 function log(mensaje, tipo = 'info') {
@@ -1108,11 +1135,19 @@ function generarReporteExcel(logs, carpetaBase, datos) {
   const xlsxPath = path.join(carpetaBase, `Listado_Pruebas_HC_${fechaHoy()}.xlsx`);
   fs.writeFileSync(jsonPath, JSON.stringify({ meta, filas }, null, 2), 'utf8');
 
-  const py = process.platform === 'win32' ? 'python' : 'python3';
-  const r = spawnSync(py, ['reporte.py', jsonPath, xlsxPath], {
-    cwd: __dirname,
-    encoding: 'utf8',
-  });
+  // Empaquetado: usar reporte.exe (PyInstaller) junto al .exe.
+  // Desarrollo: invocar python reporte.py (requiere Python + openpyxl).
+  let cmd, args, cwd;
+  if (cfg.empaquetado) {
+    cmd = path.join(cfg.dirApp, 'reporte.exe');
+    args = [jsonPath, xlsxPath];
+    cwd = cfg.dirApp;
+  } else {
+    cmd = process.platform === 'win32' ? 'python' : 'python3';
+    args = ['reporte.py', jsonPath, xlsxPath];
+    cwd = __dirname;
+  }
+  const r = spawnSync(cmd, args, { cwd, encoding: 'utf8' });
   if (r.status !== 0) {
     log('Error al generar el Excel con Python: ' + (r.stderr || r.error || '').toString().slice(0, 200), 'error');
     return null;
@@ -1132,19 +1167,20 @@ function generarReporteExcel(logs, carpetaBase, datos) {
   log(`Carpeta de salida: ${carpetaBase}`);
 
   const ids  = cfg.ids;
-  let base   = process.env.BASE_URL || cfg.urlBase;
+  const ext  = cfg.externo || {};
+  let base   = process.env.BASE_URL || ext.baseUrl || cfg.urlBase;
   const logs = [];
 
   const interactivo = process.stdin.isTTY && !(cfg.bd && cfg.bd.autoConfirmar);
 
   // ── Datos del reporte: desarrollador y cliente ───────────────
-  let desarrollador = process.env.DEV_NAME || cfg.reporte.testerDev || 'QA Automatization';
-  let cliente = cfg.reporte.clienteDefault || 'NEPS';
+  let desarrollador = process.env.DEV_NAME || ext.desarrollador || cfg.reporte.testerDev || 'QA Automatization';
+  let cliente = ext.cliente || cfg.reporte.clienteDefault || 'NEPS';
 
   // ── Obtener la cita (generándola en la BD o usando una manual) ──
   let citaId = ids.morbilidad_adulto;  // fallback manual
   let citaIdInt = null;
-  let pacienteId = parseInt(process.env.DB_PACIENTE_ID || '80420', 10);
+  let pacienteId = parseInt(process.env.DB_PACIENTE_ID || ext.pacienteId || '80420', 10);
 
   if (interactivo) {
     log('Confirma los datos de la ejecución (Enter acepta el valor por defecto):', 'titulo');
@@ -1183,7 +1219,7 @@ function generarReporteExcel(logs, carpetaBase, datos) {
       programasPYM.length ? 'ok' : 'info');
 
   if (cfg.bd && cfg.bd.usarBD) {
-    let connStr = process.env.DB_CONNECTION || '';
+    let connStr = process.env.DB_CONNECTION || ext.dbConnection || '';
 
     if (interactivo) {
       const resp = await prompts([
@@ -1197,7 +1233,7 @@ function generarReporteExcel(logs, carpetaBase, datos) {
     }
 
     if (!connStr) {
-      log('No hay cadena de conexión (define DB_CONNECTION en .env)', 'error');
+      log('No hay cadena de conexión (define "dbConnection" en config.json o DB_CONNECTION en .env)', 'error');
       process.exit(1);
     }
 
@@ -1216,14 +1252,21 @@ function generarReporteExcel(logs, carpetaBase, datos) {
 
   // ── Abrir navegador ──────────────────────────────────────────
   const spNav = ui.spinner('Abriendo navegador...');
-  const browser = await chromium.launch({
+  const lanzaOpts = {
     headless: false,
     args: [
       '--start-maximized',
       // localhost → [::1] sin cambiar el origen (evita CORS; server en IPv6)
       '--host-resolver-rules=MAP localhost [::1]',
     ],
-  });
+  };
+  // Empaquetado: usar el Chromium distribuido en "browser\" (pkg no lo incluye).
+  if (cfg.empaquetado) {
+    const chromePath = buscarChromeEmpaquetado();
+    if (chromePath) lanzaOpts.executablePath = chromePath;
+    else log('No se encontró Chromium en la carpeta "browser"; intentando el del sistema', 'warn');
+  }
+  const browser = await chromium.launch(lanzaOpts);
   const context = await browser.newContext({ viewport: null, locale: 'es-CO' });
 
   // Inyectar cookies de sesión cuando la URL NO es local (la app lee
