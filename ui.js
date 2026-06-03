@@ -10,8 +10,8 @@ function banner() {
   console.log('');
   console.log(linea);
   console.log(
-    chalk.bold.cyan('   🤖  RPA HCHealth ') +
-    chalk.gray('— Pruebas automatizadas de Historias Clínicas')
+    chalk.bold.cyan('   🤖  RPA Historias Clínicas ') +
+    chalk.gray('— Pruebas automatizadas')
   );
   console.log(linea);
   console.log('');

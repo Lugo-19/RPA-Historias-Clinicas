@@ -1,4 +1,4 @@
-# ===========================================================
+﻿# ===========================================================
 #  build.ps1 - Empaqueta el RPA HCHealth en un entregable autonomo
 #  Produce dist\ (RPA-HCHealth.exe + reporte.exe + browser\ + config.json)
 #  y, si Inno Setup esta instalado, release\RPA-HCHealth-Setup.exe.
@@ -16,7 +16,10 @@ $proj = Split-Path -Parent $PSScriptRoot      # raiz del proyecto
 $dist = Join-Path $proj 'dist'
 Set-Location $proj
 
-Write-Host "== RPA HCHealth - build ==" -ForegroundColor Cyan
+$AppName    = "RPA Historias Clínicas"   # nombre visible (instalador y .exe)
+$AppVersion = "1.0.0"
+
+Write-Host "== $AppName - build ==" -ForegroundColor Cyan
 Write-Host "Proyecto: $proj"
 
 # Limpiar/crear dist
@@ -25,32 +28,52 @@ New-Item -ItemType Directory -Path $dist | Out-Null
 
 # 0. Dependencias Node
 if (-not (Test-Path (Join-Path $proj 'node_modules'))) {
-  Write-Host "`n[0/5] npm install..." -ForegroundColor Yellow
+  Write-Host "`n[0/6] npm install..." -ForegroundColor Yellow
   npm install
 }
 
+# 0.5 Icono: convertir icono.png -> icono.ico (si existe el PNG)
+$pngIcon = Join-Path $PSScriptRoot 'icono.png'
+$icoPath = Join-Path $PSScriptRoot 'icono.ico'
+if (Test-Path $pngIcon) {
+  Write-Host "`n[0.5] Generando icono.ico desde icono.png..." -ForegroundColor Yellow
+  python (Join-Path $PSScriptRoot 'make-icon.py') $pngIcon $icoPath
+  if (-not (Test-Path $icoPath)) { Write-Warning "No se pudo generar icono.ico; se seguira sin icono." ; $icoPath = $null }
+} else {
+  Write-Warning "No hay build\icono.png; el .exe saldra con el icono por defecto."
+  $icoPath = $null
+}
+
 # 1. Bundle del RPA (Node -> .exe) con @yao-pkg/pkg
-Write-Host "`n[1/5] Empaquetando rpa.js con @yao-pkg/pkg..." -ForegroundColor Yellow
+Write-Host "`n[1/6] Empaquetando rpa.js con @yao-pkg/pkg..." -ForegroundColor Yellow
 npx --yes @yao-pkg/pkg . --targets node22-win-x64 --output (Join-Path $dist 'RPA-HCHealth.exe')
 if (-not (Test-Path (Join-Path $dist 'RPA-HCHealth.exe'))) { throw "pkg no genero el .exe" }
+# Aplicar icono + nombre/propiedades al .exe de pkg (pkg no los setea; usamos rcedit)
+Write-Host "  Aplicando icono y nombre al .exe..." -ForegroundColor Yellow
+$icoArg = if ($icoPath) { $icoPath } else { '-' }
+node (Join-Path $PSScriptRoot 'set-icon.js') (Join-Path $dist 'RPA-HCHealth.exe') $icoArg $AppName $AppVersion
 
 # 2. Bundle del reporte (Python -> reporte.exe)
-Write-Host "`n[2/5] Empaquetando reporte.py con PyInstaller..." -ForegroundColor Yellow
+Write-Host "`n[2/6] Empaquetando reporte.py con PyInstaller..." -ForegroundColor Yellow
 $pyi = (Get-Command pyinstaller -ErrorAction SilentlyContinue)
 if ($null -eq $pyi) {
   Write-Warning "PyInstaller no esta instalado. Instalalo: pip install pyinstaller openpyxl Pillow"
   throw "Falta PyInstaller"
 }
-pyinstaller --onefile --name reporte `
-  --hidden-import openpyxl --hidden-import PIL `
-  --distpath $dist `
-  --workpath (Join-Path $PSScriptRoot '_pyi_work') `
-  --specpath (Join-Path $PSScriptRoot '_pyi_spec') `
-  (Join-Path $proj 'reporte.py')
+$pyiArgs = @(
+  '--onefile', '--name', 'reporte',
+  '--hidden-import', 'openpyxl', '--hidden-import', 'PIL',
+  '--distpath', $dist,
+  '--workpath', (Join-Path $PSScriptRoot '_pyi_work'),
+  '--specpath', (Join-Path $PSScriptRoot '_pyi_spec')
+)
+if ($icoPath) { $pyiArgs += @('--icon', $icoPath) }
+$pyiArgs += (Join-Path $proj 'reporte.py')
+pyinstaller @pyiArgs
 if (-not (Test-Path (Join-Path $dist 'reporte.exe'))) { throw "PyInstaller no genero reporte.exe" }
 
 # 3. Copiar Chromium de Playwright
-Write-Host "`n[3/5] Copiando Chromium de Playwright..." -ForegroundColor Yellow
+Write-Host "`n[3/6] Copiando Chromium de Playwright..." -ForegroundColor Yellow
 $chromeExe = node -e "console.log(require('playwright').chromium.executablePath())"
 if (-not (Test-Path $chromeExe)) {
   throw "No se encontro Chromium. Ejecuta: npx playwright install chromium"
@@ -64,12 +87,12 @@ Copy-Item $chromiumRoot -Destination $browserDest -Recurse
 Write-Host ("  Chromium copiado: " + (Split-Path -Leaf $chromiumRoot))
 
 # 4. Archivos de configuracion y ayuda
-Write-Host "`n[4/5] Copiando config.json y LEEME..." -ForegroundColor Yellow
+Write-Host "`n[4/6] Copiando config.json y LEEME..." -ForegroundColor Yellow
 Copy-Item (Join-Path $proj 'config.json.example') (Join-Path $dist 'config.json')
 Copy-Item (Join-Path $proj 'LEEME.txt')           (Join-Path $dist 'LEEME.txt') -ErrorAction SilentlyContinue
 
 # 5. Instalador con Inno Setup (opcional)
-Write-Host "`n[5/5] Generando instalador (Inno Setup)..." -ForegroundColor Yellow
+Write-Host "`n[5/6] Generando instalador (Inno Setup)..." -ForegroundColor Yellow
 $iscc = @(
   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
   "C:\Program Files\Inno Setup 6\ISCC.exe",

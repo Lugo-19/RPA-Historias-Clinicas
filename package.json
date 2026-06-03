@@ -9,7 +9,9 @@
     "build": "powershell -ExecutionPolicy Bypass -File build/build.ps1"
   },
   "pkg": {
-    "targets": ["node22-win-x64"],
+    "targets": [
+      "node22-win-x64"
+    ],
     "outputPath": "dist",
     "assets": [
       "node_modules/playwright/**/*",
@@ -29,5 +31,8 @@
     "ora": "^5.4.1",
     "playwright": "^1.44.0",
     "prompts": "^2.4.2"
+  },
+  "devDependencies": {
+    "rcedit": "^5.0.2"
   }
 }

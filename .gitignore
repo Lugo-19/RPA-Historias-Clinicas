@@ -6,6 +6,8 @@ dist/
 release/
 build/_pyi_work/
 build/_pyi_spec/
+build/icono.ico
+build/*.log
 *.spec
 
 # config.json real del usuario (contiene la contraseña de BD); usar config.json.example
