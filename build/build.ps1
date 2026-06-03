@@ -48,10 +48,16 @@ if (Test-Path $pngIcon) {
 Write-Host "`n[1/6] Empaquetando rpa.js con @yao-pkg/pkg..." -ForegroundColor Yellow
 npx --yes @yao-pkg/pkg . --targets node22-win-x64 --output (Join-Path $dist 'RPA-HCHealth.exe')
 if (-not (Test-Path (Join-Path $dist 'RPA-HCHealth.exe'))) { throw "pkg no genero el .exe" }
-# Aplicar icono + nombre/propiedades al .exe de pkg (pkg no los setea; usamos rcedit)
-Write-Host "  Aplicando icono y nombre al .exe..." -ForegroundColor Yellow
-$icoArg = if ($icoPath) { $icoPath } else { '-' }
-node (Join-Path $PSScriptRoot 'set-icon.js') (Join-Path $dist 'RPA-HCHealth.exe') $icoArg $AppName $AppVersion
+# IMPORTANTE: NO usar rcedit sobre el .exe de pkg. rcedit reescribe la seccion de
+# recursos (icono/version) y DESPLAZA el payload que pkg appende al final del
+# binario -> al arrancar da "Pkg: Error reading from file" (el .exe no abre).
+# El icono y el nombre se aplican via el instalador y los accesos directos
+# (installer.iss apunta a icono.ico), sin tocar el binario. Por eso copiamos el
+# .ico dentro de dist para que se instale junto al .exe.
+if ($icoPath) {
+  Copy-Item $icoPath (Join-Path $dist 'icono.ico') -Force
+  Write-Host "  icono.ico copiado a dist (lo usan instalador y accesos directos)."
+}
 
 # 2. Bundle del reporte (Python -> reporte.exe)
 Write-Host "`n[2/6] Empaquetando reporte.py con PyInstaller..." -ForegroundColor Yellow

@@ -30,7 +30,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 #if FileExists(SourcePath + "icono.ico")
 SetupIconFile=icono.ico
 #endif
-UninstallDisplayIcon={app}\{#AppExe}
+UninstallDisplayIcon={app}\icono.ico
 ; Pesa cientos de MB (Chromium); no exigir admin si se instala por usuario
 PrivilegesRequiredOverridesAllowed=dialog
 
@@ -42,8 +42,8 @@ Name: "es"; MessagesFile: "compiler:Languages\Spanish.isl"
 Source: "..\dist\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
-Name: "{group}\{#AppName}";        Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"
-Name: "{autodesktop}\{#AppName}";  Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{group}\{#AppName}";        Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"; IconFilename: "{app}\icono.ico"
+Name: "{autodesktop}\{#AppName}";  Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"; Tasks: desktopicon; IconFilename: "{app}\icono.ico"
 Name: "{group}\Editar configuración"; Filename: "notepad.exe"; Parameters: """{app}\config.json"""
 
 [Tasks]
