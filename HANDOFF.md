@@ -2,7 +2,7 @@
 
 > Documento de traspaso. Resume qué es el proyecto, cómo correrlo, cómo está
 > construido, qué decisiones se tomaron y qué falta.
-> Última actualización: 2026-06-03.
+> Última actualización: 2026-06-03 (empaquetado autónomo + branding "RPA Historias Clínicas" validado).
 
 ---
 
@@ -32,8 +32,11 @@ Carpeta del proyecto: **`C:\HCHealth_RPA_Output\playwright-rpa\`**
 | `rpa.js` | Orquestador principal (Playwright): prompts, navegación, llenado, guardado, impresiones, reportes. |
 | `db.js` | Conexión a SQL Server (`mssql`), ejecuta el SP `agd_generar_citas`, convierte el Id de cita a base64. |
 | `ui.js` | Consola vistosa con `chalk` (colores) + `ora` (spinners): banner, `log`, spinners, caja resumen. |
+| `logger.js` | **Logs a archivo** (síncronos) para diagnóstico: `<carpetaSalida>\logs\rpa_log_*.txt`; tee de console + errores no atrapados. Clave para depurar el `.exe`. |
 | `reporte.py` | **Generador del Excel QA** con `openpyxl`: hoja Checklist + Dashboard con gráficos + evidencias incrustadas. |
-| `config.js` | Comportamiento configurable (toggles, semillas de búsqueda, datos de reporte, BD, **programas PYM**). |
+| `config.js` | Comportamiento configurable (toggles, semillas de búsqueda, datos de reporte, BD, **programas PYM**); detecta modo empaquetado y carga `config.json`. |
+| `config.json.example` | Plantilla de config externa para el `.exe` (BD, URL, paciente, **carpeta de salida**); se distribuye como `config.json`. |
+| `build/` | Empaquetado: `build.ps1`, `installer.iss`, `make-icon.py`, `icono.png`. Ver §13. |
 | `recon-pym.js` | Utilidad de inspección (NO parte del flujo): abre una HC, espera el modal PYM y vuelca su estructura (controles, labels, selectores) a JSON + screenshot. Sirve para (re)mapear los programas del modal. |
 | `.env` | Credenciales de BD y PacienteId (NO se sube a git). |
 | `.env.example` | Plantilla de `.env` sin secretos. |
@@ -197,6 +200,12 @@ incluyendo el programa **PYM Prenatal**.
 - Última corrida: **31 casos, 0 fallos** (incluye los 18 paneles de Prenatal + 4 impresiones).
 - Cita fresca por corrida.
 
+✅ **Empaquetado autónomo terminado y validado** (ver §13): instalador
+**RPA Historias Clínicas** (con ícono y nombre propios) que corre sin Node/Python; config con
+defaults listos (carpeta `C:/CheckLists` + clave); verificado corriendo el flujo completo desde
+el `.exe` contra producción. Se resolvieron 2 bugs solo-del-`.exe` (rcedit corrompía el binario;
+bytecode rompía `page.evaluate`) — ver gotchas en §13.
+
 ---
 
 ## 10. Pendientes / próximos pasos
@@ -248,10 +257,14 @@ python reporte.py "<ruta>\reporte_data.json" "<ruta>\salida.xlsx"
 ## 13. Empaquetado / distribución (herramienta autónoma)
 
 El RPA puede empaquetarse en un entregable que corre **sin instalar Node ni Python**.
-El usuario final recibe **un instalador** (`RPA-HCHealth-Setup.exe`, Inno Setup) que
-despliega una carpeta con:
+✅ **Verificado end-to-end** (Morbilidad completo: llena campos, captura todos los tabs +
+los 18 paneles de Prenatal, genera Excel/HTML) corriendo desde el `.exe`.
+
+El usuario final recibe **un instalador** (`RPA-HCHealth-Setup.exe`, ~170 MB, Inno Setup) con
+identidad **"RPA Historias Clínicas"** (nombre + ícono propio) que despliega una carpeta con:
 `RPA-HCHealth.exe` (rpa.js vía `@yao-pkg/pkg`) · `reporte.exe` (reporte.py vía
-PyInstaller) · `browser\` (Chromium de Playwright, ~300 MB) · `config.json` · `LEEME.txt`.
+PyInstaller) · `browser\` (Chromium de Playwright, ~300 MB) · `config.json` · `icono.ico` ·
+`LEEME.txt`. El usuario instala → doble clic en el acceso directo → corre (sin editar nada).
 
 **Cómo el código detecta el modo empaquetado** (sin romper `node rpa.js` en dev):
 - `config.js` expone `empaquetado` (`!!process.pkg`) y `dirApp`
@@ -259,12 +272,18 @@ PyInstaller) · `browser\` (Chromium de Playwright, ~300 MB) · `config.json` ·
 - `config.js` carga overrides desde `config.json` (junto al .exe) → `cfg.externo`
   (`dbConnection`, `pacienteId`, `baseUrl`, `cliente`, `desarrollador`, `carpetaSalida`).
   `rpa.js` los usa como fallback de `.env`: `process.env.X || cfg.externo.X || default`.
-- `carpetaSalida` por defecto: empaquetado → `Salidas\` junto al .exe; dev → `C:\HCHealth_RPA_Output`.
+- `carpetaSalida` por defecto: el `config.json.example` que se distribuye ya trae
+  `"C:/CheckLists"` (y la cadena de conexión con la clave real), así el usuario no edita nada.
+  Si `carpetaSalida` queda vacío: empaquetado → `Salidas\` junto al .exe; dev → `C:\HCHealth_RPA_Output`.
 - **Reporte**: empaquetado spawnea `reporte.exe`; dev sigue usando `python reporte.py`.
 - **Chromium**: empaquetado usa `executablePath` localizando `chrome.exe` bajo `browser\`
   (`buscarChromeEmpaquetado` en `rpa.js`); dev usa el del caché de Playwright.
-- ⚠️ La contraseña de BD queda en texto plano en `config.json` (decisión de comodidad).
-  `config.json` está en `.gitignore`; se versiona solo `config.json.example`.
+- **Logs de diagnóstico** (`logger.js`): cada corrida escribe `<carpetaSalida>\logs\rpa_log_*.txt`
+  (síncrono, sobrevive a cuelgues/cierres); captura console + errores no atrapados. Fue lo que
+  permitió diagnosticar los bugs del empaquetado.
+- ⚠️ La contraseña de BD queda en texto plano en `config.json` **y en `config.json.example`**
+  (decisión de comodidad; el repo es solo local). `config.json` real está en `.gitignore`.
+  **El instalador contiene la clave** → no subirlo a sitios públicos.
 
 **⚠️ Gotchas críticos del empaquetado (NO romper):**
 1. **pkg debe ir `--no-bytecode --public --public-packages "*"`**. Por defecto pkg compila el
@@ -283,5 +302,8 @@ npm run build      # = powershell -File build\build.ps1
 Requisitos en la máquina de **build** (no en la del usuario): Node 22, Python +
 `pyinstaller`/`openpyxl`/`Pillow`, Chromium de Playwright instalado, e Inno Setup 6
 (opcional; sin él, `dist\` queda como carpeta portátil para comprimir en .zip).
-Archivos: `build\build.ps1` (orquesta pkg + PyInstaller + copia de Chromium + Inno),
-`build\installer.iss` (definición del instalador), `config.json.example`, `LEEME.txt`.
+Archivos: `build\build.ps1` (orquesta pkg + PyInstaller + Chromium + ícono + Inno),
+`build\installer.iss` (definición del instalador, UTF-8 con BOM por los acentos),
+`build\make-icon.py` (PNG→ICO: quita fondo oscuro + recorta), `build\icono.png` (fuente del
+ícono), `config.json.example`, `LEEME.txt`. (`build\set-icon.js`/rcedit quedó **sin uso** tras
+el gotcha #2.)

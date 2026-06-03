@@ -2,7 +2,9 @@
 
 Pendientes priorizados para futuras sesiones. Estado: ✅ Morbilidad end-to-end
 (paciente adulto) + **programa PYM Prenatal** (selección por consola, activación,
-expansión de acordeones, clasificación de alertas y evidencia panel-por-panel).
+expansión de acordeones, clasificación de alertas y evidencia panel-por-panel) +
+✅ **empaquetado autónomo** distribuible (instalador "RPA Historias Clínicas", sin Node/Python,
+validado corriendo el flujo completo desde el `.exe`).
 Ver `HANDOFF.md` para el detalle del sistema actual.
 
 ---
@@ -69,15 +71,18 @@ Mensaje sugerido de inicio:
   en una corrida.
 - [ ] **Selección de módulo a ejecutar** desde prompt/config (hoy fijo Morbilidad).
 
-- [x] **Empaquetado como herramienta autónoma (.exe)** — ✅ build verificado.
-  `npm run build` genera `release\RPA-HCHealth-Setup.exe` (~175 MB, instalador Inno Setup;
-  `dist\` portátil de ~563 MB). Corre sin Node/Python: `config.js`/`rpa.js` detectan
-  `process.pkg` y usan `config.json` (tolera BOM) + `reporte.exe` (PyInstaller) + Chromium
-  en `browser\`; consola en UTF-8 (`chcp 65001`). Smoke test del .exe OK (arranca, lee
-  config, sale limpio sin BD). Ver HANDOFF.md §13.
-  - [ ] **Pendiente**: probar el instalador en una máquina **limpia** (sin Node/Python),
-    con la app Angular y la BD accesibles, y correr el flujo completo (cita → llenado →
-    guardado → impresiones → Excel) end-to-end desde el .exe.
+- [x] **Empaquetado como herramienta autónoma (.exe)** — ✅ **TERMINADO y validado end-to-end.**
+  `npm run build` genera `release\RPA-HCHealth-Setup.exe` (~170 MB, instalador Inno Setup
+  "RPA Historias Clínicas" con ícono propio). Corre sin Node/Python: `config.js`/`rpa.js`
+  detectan `process.pkg` y usan `config.json` (defaults: `C:/CheckLists` + clave) + `reporte.exe`
+  (PyInstaller) + Chromium en `browser\`; consola UTF-8 (`chcp 65001`); logs en
+  `<carpetaSalida>\logs\`. **Verificado** corriendo el flujo completo desde el `.exe`
+  (llena campos, captura tabs + 18 paneles de Prenatal). Ver HANDOFF.md §13.
+  - [x] **2 bugs solo-del-`.exe` resueltos** (ver gotchas §13): (a) rcedit corrompía el binario
+    de pkg (`Pkg: Error reading from file`) → ícono vía instalador, no rcedit; (b) bytecode de
+    pkg rompía `page.evaluate` de Playwright (`not well-serializable`) → `--no-bytecode`.
+  - [x] **Ícono + nombre** "RPA Historias Clínicas" (fondo transparente, `make-icon.py`).
+  - [x] **Sistema de logs a archivo** (`logger.js`) para diagnóstico del `.exe`.
 
 ## Prioridad BAJA
 
