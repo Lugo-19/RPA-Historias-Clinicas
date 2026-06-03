@@ -104,6 +104,57 @@ module.exports = {
   // los sub-formularios que aparecen (ej: "¿Requiere incapacidad?").
   casillasARevisar: ['incapacidad'],
 
+  // Expandir los paneles de acordeón (ngb-accordion) antes de llenar, para
+  // que los campos de paneles colapsados (ej. Prenatal: Gestación Actual,
+  // Exámenes por trimestre, Monitoreo) también se diligencien y capturen.
+  expandirPaneles: true,
+
+  // Para tabs de PYM (revelados por programas activados): capturar cada panel
+  // del acordeón por separado y registrarlo como una fila propia en el reporte.
+  // Los tabs base conservan la captura única.
+  evidenciaPanelPorPanelPYM: true,
+
+  // ── Modal PYM (Promoción y Mantenimiento) ───────────────────
+  // Al abrir una HC aparece el modal PYM con una lista de programas.
+  // El robot ubica cada fila por el texto de su label y marca el radio "SI"
+  // de los programas que actives aquí; el resto quedan en "NO" (default).
+  // Activar un programa revela su(s) tab(s)/sección(es) en la historia.
+  pym: {
+    // Programas a activar por defecto (deben coincidir con un label de
+    // `disponibles`). Vacío = no activa ninguno (solo "Aceptar").
+    activar: ['Prenatal'],
+
+    // En modo interactivo, preguntar por consola (multiselect) cuáles
+    // activar antes de arrancar. En no interactivo se usa `activar`.
+    preguntar: true,
+
+    // Programas VALIDADOS end-to-end (revelan su tab y se diligencian bien).
+    // El resto se muestran en la consola "para seguir el flujo" pero con la
+    // anotación "(no validado)". Por ahora solo Prenatal está validado.
+    funcionales: ['Prenatal'],
+
+    // Catálogo de programas del modal (label EXACTO como aparece en pantalla).
+    // Mapeado por recon-pym.js. El número es el form-control interno (informativo).
+    disponibles: [
+      'Artritis Reumatoide',          // 42
+      'VIH',                          // 43
+      'Asma',                         // 44
+      'Adulto',                       //  5
+      'Planificacion Familiar',       //  6
+      'Agudeza Visual y Auditiva',    //  7
+      'Prenatal',                     //  8
+      'Preconcepcional',              // 28
+      'Ruta Crónicos',                //  9
+      'Obesidad',                     // 37
+      'Falla Cardiaca',               // 36
+      'Tuberculosis',                 // 31
+      'Cervix',                       // 12
+      'EPOC',                         // 27
+      'Salud Mental',                 //  3
+      'Vacunacion',                   // 11
+    ],
+  },
+
   // ── Tiempos de espera (en milisegundos) ─────────────────────
   // Solo cambia estos valores si el robot va muy rápido o muy lento.
   tiempos: {

@@ -193,6 +193,9 @@ async function llenarSelects(page) {
     }
     if (llenados === 0) break;       // nada nuevo que llenar
     await page.waitForTimeout(300);  // dejar que aparezcan selects revelados
+    // Cambiar selects clínicos (ej. Toxoplasma IgG/IgM) dispara alertas que
+    // tapan los siguientes; descartarlas antes de la próxima pasada.
+    await cerrarAlertas(page);
   }
   return total;
 }
@@ -250,21 +253,39 @@ async function llenarMultiselects(page, semillas) {
   return n;
 }
 
-// ── Cerrar alertas emergentes (SweetAlert) que bloquean ──────
-// Algunos campos disparan alertas al perder el foco (ej. cifras altas).
-// Esta función las cierra para que el bot no se quede bloqueado.
+// ── Clasificación de alertas (SweetAlert2) ───────────────────
+// El frontend (HCHealth) muestra TODO con Swal.fire sin wrapper. La
+// distinción fiable es por CONTENIDO, no por ícono: los errores de backend
+// (deserialización, excepciones) se muestran incluso como `warning`, así
+// que se reconocen por su texto. Ver catálogo en el código del frontend
+// (prenatal.component.ts / morbilidad/index.component.ts).
+const RE_ERROR_APP = /error occurred|deserializ|exception|bsontype|no se pudo guardar|ha ocurrido un error|stack trace|unable to/i;
+const RE_EXITO     = /guardado|[ée]xito/i;
+
+// Selector de un popup SweetAlert (2 y legacy) visible.
+const SEL_SWAL = '.swal2-popup, .sweet-alert.visible, .sweet-alert.showSweetAlert';
+
+// ── Cerrar alertas que bloquean (clínicas / info / validación) ──
+// Cierra las alertas NO críticas (ej. "tamización mensual con IgM",
+// remisiones, "faltan datos", cifras vitales altas) para que el bot
+// continúe. DEJA ABIERTAS las de ERROR de backend (las marca FAIL
+// `detectarErrorApp`) y las de ÉXITO (las captura `capturarExito`).
 async function cerrarAlertas(page) {
-  for (let k = 0; k < 4; k++) {
-    const alerta = page.locator(
-      '.sweet-alert.visible, .sweet-alert.showSweetAlert, .swal2-popup, .swal2-container'
-    );
-    let visibleCount = 0;
-    try { visibleCount = await alerta.count(); } catch { break; }
-    if (!visibleCount) break;
-    // Preferir "No"/"Cancelar"; si no, "Aceptar"/"Si"
+  for (let k = 0; k < 5; k++) {
+    const alerta = page.locator(SEL_SWAL).first();
+    let cnt = 0;
+    try { cnt = await alerta.count(); } catch { break; }
+    if (!cnt) break;
+    if (!(await alerta.isVisible().catch(() => false))) break;
+
+    const texto = (await alerta.innerText({ timeout: 600 }).catch(() => '')) || '';
+    // No tocar errores de backend ni mensajes de éxito.
+    if (RE_ERROR_APP.test(texto) || RE_EXITO.test(texto)) break;
+
+    // Descartar la alerta clínica/info: botón OK/Aceptar/Cerrar/Continuar (o No/Cancelar).
     const btn = alerta
       .locator('button')
-      .filter({ hasText: /^(no|cancelar|aceptar|s[ií])$/i });
+      .filter({ hasText: /^\s*(ok|aceptar|s[ií]|no|cancelar|cerrar|continuar)\s*$/i });
     try {
       await btn.first().click({ timeout: 1500 });
       await page.waitForTimeout(500);
@@ -272,6 +293,43 @@ async function cerrarAlertas(page) {
       break;
     }
   }
+}
+
+// ── Detectar un error de backend en un SweetAlert visible ────
+// Algunos tabs (ej. Prenatal) disparan un modal de error del servidor
+// (deserialización Mongo, excepciones, etc.) con botón "OK". Lo detecta
+// para marcar el tab como FALLIDO. NO es el mensaje de éxito de guardado.
+async function detectarErrorApp(page) {
+  try {
+    const alerta = page.locator(SEL_SWAL).first();
+    if (!(await alerta.count())) return { hayError: false, texto: '' };
+    if (!(await alerta.isVisible().catch(() => false))) return { hayError: false, texto: '' };
+    const texto = (await alerta.innerText({ timeout: 800 }).catch(() => '')) || '';
+    // Ignorar éxito; reconocer SOLO errores de backend/excepciones (no
+    // validaciones clínicas genéricas), por contenido — ver RE_ERROR_APP.
+    if (RE_EXITO.test(texto)) return { hayError: false, texto: '' };
+    if (RE_ERROR_APP.test(texto)) {
+      return { hayError: true, texto: texto.replace(/\s+/g, ' ').trim() };
+    }
+    return { hayError: false, texto: '' };
+  } catch {
+    return { hayError: false, texto: '' };
+  }
+}
+
+// ── Cerrar un SweetAlert con su botón OK / Aceptar ───────────
+// Se usa para descartar el modal de error tras capturarlo como evidencia.
+// (No se añade "ok" a cerrarAlertas global para no cerrar el error antes
+// de poder detectarlo.)
+async function cerrarAlertaOK(page) {
+  try {
+    const alerta = page.locator(
+      '.sweet-alert.visible, .sweet-alert.showSweetAlert, .swal2-popup'
+    ).first();
+    const btn = alerta.locator('button').filter({ hasText: /^(ok|aceptar|s[ií]|cerrar)$/i });
+    await btn.first().click({ timeout: 1500 });
+    await page.waitForTimeout(400);
+  } catch { /* nada que cerrar */ }
 }
 
 // ── Marcar casillas que revelan sub-formularios (ej. incapacidad) ──
@@ -466,10 +524,98 @@ async function capturarImpresiones(page, carpetaRun) {
 //   1) Dropdowns buscables PRIMERO → al agregar aparecen filas/formularios nuevos
 //   2) Texto + radios por JS (rápido, sin scroll) → cubre también las filas nuevas
 //   3) Selects al final → cubre los selects de las filas recién agregadas
+// ── Expandir paneles de acordeón (ngb-accordion) colapsados ──
+// Tabs como Prenatal usan <ngb-accordion> con todos los paneles colapsados
+// (activeIds="colapsado"). Sus campos no existen/visibles hasta abrirlos.
+// El toggle es el header (h4.titletabs / [ngbPanelToggle]); se hace clic en
+// cada panel que NO esté ya expandido (.collapse.show). Varias pasadas por
+// si abrir uno revela acordeones anidados.
+async function expandirPaneles(page) {
+  let abiertosTotal = 0;
+  for (let pasada = 0; pasada < 5; pasada++) {
+    const abiertos = await page.evaluate(() => {
+      const visible = (el) => el && el.offsetParent !== null && el.offsetHeight > 0;
+      let n = 0;
+      // Toggles del acordeón: el header del source es <h4 class="titletabs" ngbPanelToggle>.
+      // (el atributo ngbPanelToggle se matchea case-insensitive en HTML)
+      const toggles = document.querySelectorAll('h4.titletabs, [ngbpaneltoggle]');
+      toggles.forEach((t) => {
+        if (t.dataset.rpaSeen) return;        // ya procesado en una pasada previa
+        if (!visible(t)) return;
+        t.dataset.rpaSeen = '1';
+        // Si ya está expandido (aria-expanded=true), no volver a hacer clic.
+        const aria = t.getAttribute('aria-expanded');
+        if (aria === 'true') return;
+        t.click(); n++;
+      });
+      return n;
+    });
+    if (!abiertos) break;            // no quedaban paneles nuevos por abrir
+    abiertosTotal += abiertos;
+    await esperarPaginaLista(page);  // dejar renderizar el contenido del panel
+    await page.waitForTimeout(350);
+  }
+  if (abiertosTotal) log(`Paneles de acordeón expandidos: ${abiertosTotal}`, 'ok');
+  return abiertosTotal;
+}
+
+// ── ¿El tab actual corresponde a un programa PYM activado? ───
+// Compara (normalizado, sin acentos) el nombre del tab contra la lista de
+// programas activados. Ej. programa "Prenatal" → tab "Prenatal".
+function esTabPYM(tabNombreRaw, programasPYM) {
+  if (!Array.isArray(programasPYM) || !programasPYM.length) return false;
+  const norm = (s) => limpiarNombre(String(s)).toLowerCase();
+  const t = norm(tabNombreRaw);
+  if (!t) return false;
+  return programasPYM.some((p) => {
+    const pn = norm(p);
+    return pn && (t.includes(pn) || pn.includes(t));
+  });
+}
+
+// ── Capturar panel por panel un tab de PYM (acordeón) ────────
+// Cada panel (.card del ngb-accordion, header <h4.titletabs>) se captura como
+// element screenshot recortado. Devuelve [{ titulo, ruta }] por panel.
+async function capturarPanelesPYM(page, carpetaRun, tabIndex, tabNombreClean) {
+  // Marcar cada contenedor de panel y obtener su título.
+  const paneles = await page.evaluate(() => {
+    const heads = [...document.querySelectorAll('h4.titletabs')]
+      .filter((h) => h.offsetParent !== null && h.offsetHeight > 0);
+    return heads.map((h, i) => {
+      const card = h.closest('.card') || h.parentElement?.parentElement || h;
+      card.setAttribute('data-rpa-panel', String(i));
+      return { i, titulo: (h.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 40) };
+    });
+  });
+
+  const evidencias = [];
+  for (const p of paneles) {
+    const loc = page.locator(`[data-rpa-panel="${p.i}"]`).first();
+    const tituloLimpio = limpiarNombre(p.titulo) || `panel_${p.i + 1}`;
+    const ruta = path.join(
+      carpetaRun,
+      `${String(tabIndex).padStart(2, '0')}_${tabNombreClean}__${String(p.i + 1).padStart(2, '0')}_${tituloLimpio}.png`
+    );
+    try {
+      await loc.scrollIntoViewIfNeeded({ timeout: 3000 });
+      await page.waitForTimeout(200);
+      await cerrarAlertas(page);                 // descartar alertas clínicas residuales
+      await loc.screenshot({ path: ruta, timeout: 5000 });
+    } catch {
+      // Fallback: captura de viewport (mejor algo que nada).
+      try { await page.screenshot({ path: ruta }); } catch { continue; }
+    }
+    log(`Captura panel: ${path.basename(ruta)}`, 'ok');
+    evidencias.push({ titulo: p.titulo, ruta });
+  }
+  return evidencias;
+}
+
 async function rellenarCampos(page) {
   const semillas = cfg.semillasBusqueda || ['a01', 'ace', 'rad', 'eco'];
   let n = 0;
 
+  if (cfg.expandirPaneles) await expandirPaneles(page);  // 0) abrir acordeones colapsados
   n += await llenarMultiselects(page, semillas);   // 1) agrega filas (diagnóstico, etc.)
   await page.waitForTimeout(300);
   const casillas = await marcarCasillasRequeridas(page); // 2) marcar incapacidad, etc.
@@ -528,7 +674,7 @@ async function navegarA(page, url) {
 // asíncrona — hay que esperar que el último ítem ("Puerperio") cargue
 // antes de hacer clic en Aceptar.
 
-async function manejarModalPYM(page) {
+async function manejarModalPYM(page, programas = []) {
   try {
     await page.waitForSelector('div.modal-content', { state: 'visible', timeout: 15000 });
     log('Modal PYM detectado, esperando que carguen todas las opciones...');
@@ -539,17 +685,57 @@ async function manejarModalPYM(page) {
     });
     await page.waitForTimeout(500);
 
+    // ── Activar los programas elegidos (marcar su radio "SI") ──
+    // Cada programa es una fila .form-group.row con un <label.text-pym-title>
+    // y un par de radios SI/NO (el primero = SI). Ubicamos por texto del label.
+    for (const nombre of programas) {
+      try {
+        const fila = page
+          .locator('div.modal-content .form-group.row')
+          .filter({ has: page.locator('label.text-pym-title', { hasText: new RegExp(`^\\s*${escaparRegex(nombre)}\\s*$`, 'i') }) });
+
+        if (!(await fila.count())) {
+          log(`PYM: programa "${nombre}" no encontrado en el modal`, 'warn');
+          continue;
+        }
+
+        // El <input radio> está oculto (kt-radio); se hace clic en el LABEL "SI".
+        const labelSi = fila.first()
+          .locator('label.kt-radio')
+          .filter({ hasText: /^\s*SI\s*$/i })
+          .first();
+        await labelSi.click({ timeout: 4000 });
+        await page.waitForTimeout(150);
+
+        // Confirmar que el input correspondiente quedó marcado
+        const radioSi = labelSi.locator('input[type="radio"]').first();
+        if (await radioSi.isChecked()) {
+          log(`PYM: "${nombre}" activado (SI)`, 'ok');
+        } else {
+          log(`PYM: "${nombre}" no quedó marcado`, 'warn');
+        }
+      } catch (e) {
+        log(`PYM: no se pudo activar "${nombre}": ${e.message.slice(0, 80)}`, 'warn');
+      }
+    }
+    if (programas.length) await page.waitForTimeout(400);
+
     const btnAceptar = page
       .locator('div.modal-footer button, div.modal-body ~ * button, button')
       .filter({ hasText: 'Aceptar' });
     await btnAceptar.first().click();
-    log('Modal PYM cerrado con Aceptar', 'ok');
+    log(`Modal PYM cerrado con Aceptar${programas.length ? ` (activados: ${programas.join(', ')})` : ''}`, 'ok');
 
     await page.waitForSelector('div.modal-content', { state: 'hidden', timeout: 10000 });
     await esperarPaginaLista(page);
   } catch {
     log('Modal PYM no apareció o ya estaba cerrado', 'warn');
   }
+}
+
+// Escapa caracteres especiales de regex en un texto literal.
+function escaparRegex(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 // ── Manejar modal de Odontología ──────────────────────────────
@@ -570,7 +756,7 @@ async function manejarModalOdontologia(page, tipoVisita = 'Control') {
 
 // ── Recorrer todos los tabs de un módulo ─────────────────────
 
-async function recorrerTabs(page, carpetaRun, modulo, run, encId, logs) {
+async function recorrerTabs(page, carpetaRun, modulo, run, encId, logs, programasPYM = []) {
   let tabIndex = 1;
 
   while (true) {
@@ -603,6 +789,7 @@ async function recorrerTabs(page, carpetaRun, modulo, run, encId, logs) {
     // Hacer clic en el tab
     let status = 'PASS';
     let error  = '';
+    let manejadoPYM = false;  // true = ya se registraron filas panel-por-panel
 
     try {
       await tabEl.click();
@@ -620,17 +807,58 @@ async function recorrerTabs(page, carpetaRun, modulo, run, encId, logs) {
         }
       }
 
-      // ¿Necesita scroll extra?
-      const necesitaScroll = cfg.tabsConScroll.some(t =>
-        tabNombreRaw.toLowerCase().includes(t.toLowerCase())
-      );
+      // Detectar error de backend (SweetAlert "OK") antes de capturar.
+      const errorApp = await detectarErrorApp(page);
 
-      const rutaCaptura = path.join(
-        carpetaRun,
-        `${String(tabIndex).padStart(2, '0')}_${tabNombreClean}.png`
-      );
+      // ── Rama PYM: una fila por panel del acordeón ──
+      const esPYM = cfg.evidenciaPanelPorPanelPYM && esTabPYM(tabNombreRaw, programasPYM);
+      if (esPYM) {
+        // Si hubo error de backend, registrarlo como una fila FAIL aparte.
+        if (errorApp.hayError) {
+          const rutaErr = path.join(carpetaRun, `${String(tabIndex).padStart(2, '0')}_${tabNombreClean}__00_Error.png`);
+          await page.screenshot({ path: rutaErr }).catch(() => {});
+          log(`Error de backend en tab "${tabNombreRaw}": ${errorApp.texto.slice(0, 140)}`, 'error');
+          logs.push({
+            fecha: fechaHoy(), modulo, run, encId: encId || '', tabIndex,
+            tabNombre: `${tabNombreRaw} — Error de carga`, status: 'FAIL',
+            error: ('Error de la app: ' + errorApp.texto).slice(0, 200),
+            screenshot: rutaErr, hora: horaAhora(), duracion: '0',
+          });
+          await cerrarAlertaOK(page);
+        }
+        const paneles = await capturarPanelesPYM(page, carpetaRun, tabIndex, tabNombreClean);
+        if (paneles.length) {
+          manejadoPYM = true;
+          const dur = ((Date.now() - inicio) / 1000).toFixed(1);
+          for (const pnl of paneles) {
+            logs.push({
+              fecha: fechaHoy(), modulo, run, encId: encId || '', tabIndex,
+              tabNombre: `${tabNombreRaw} — ${pnl.titulo}`, status: 'PASS', error: '',
+              screenshot: pnl.ruta, hora: horaAhora(), duracion: dur,
+            });
+          }
+          log(`Tab PYM "${tabNombreRaw}": ${paneles.length} paneles capturados`, 'ok');
+        }
+      }
 
-      await tomarCaptura(page, rutaCaptura, necesitaScroll);
+      // ── Flujo normal (tab base o PYM sin acordeón): captura única ──
+      if (!manejadoPYM) {
+        const necesitaScroll = cfg.tabsConScroll.some(t =>
+          tabNombreRaw.toLowerCase().includes(t.toLowerCase())
+        );
+        const rutaCaptura = path.join(
+          carpetaRun,
+          `${String(tabIndex).padStart(2, '0')}_${tabNombreClean}.png`
+        );
+        await tomarCaptura(page, rutaCaptura, necesitaScroll);
+
+        if (errorApp.hayError) {
+          status = 'FAIL';
+          error  = ('Error de la app: ' + errorApp.texto).slice(0, 200);
+          log(`Error de backend en tab "${tabNombreRaw}": ${errorApp.texto.slice(0, 140)}`, 'error');
+          await cerrarAlertaOK(page);   // descartar el modal para continuar
+        }
+      }
 
     } catch (e) {
       status = 'FAIL';
@@ -638,21 +866,23 @@ async function recorrerTabs(page, carpetaRun, modulo, run, encId, logs) {
       log(`ERROR en tab "${tabNombreRaw}": ${error}`, 'error');
     }
 
-    const duracion = ((Date.now() - inicio) / 1000).toFixed(1);
-
-    logs.push({
-      fecha:    fechaHoy(),
-      modulo,
-      run,
-      encId:    encId || '',
-      tabIndex,
-      tabNombre: tabNombreRaw,
-      status,
-      error,
-      screenshot: path.join(carpetaRun, `${String(tabIndex).padStart(2, '0')}_${tabNombreClean}.png`),
-      hora:     horaAhora(),
-      duracion,
-    });
+    // Filas panel-por-panel ya se registraron arriba; aquí solo el caso normal.
+    if (!manejadoPYM) {
+      const duracion = ((Date.now() - inicio) / 1000).toFixed(1);
+      logs.push({
+        fecha:    fechaHoy(),
+        modulo,
+        run,
+        encId:    encId || '',
+        tabIndex,
+        tabNombre: tabNombreRaw,
+        status,
+        error,
+        screenshot: path.join(carpetaRun, `${String(tabIndex).padStart(2, '0')}_${tabNombreClean}.png`),
+        hora:     horaAhora(),
+        duracion,
+      });
+    }
 
     tabIndex++;
   }
@@ -663,7 +893,7 @@ async function recorrerTabs(page, carpetaRun, modulo, run, encId, logs) {
 // ── Ejecutar un módulo completo ───────────────────────────────
 
 async function ejecutarModulo(page, opciones, logs) {
-  const { modulo, run, url, encId, carpetaBase, tipoModalOdonto } = opciones;
+  const { modulo, run, url, encId, carpetaBase, tipoModalOdonto, programasPYM } = opciones;
 
   log(`MÓDULO: ${modulo} — ${run}`, 'titulo');
 
@@ -677,7 +907,7 @@ async function ejecutarModulo(page, opciones, logs) {
 
   await navegarA(page, url);
 
-  await manejarModalPYM(page);
+  await manejarModalPYM(page, programasPYM || []);
 
   if (modulo === 'Odontologia') {
     await manejarModalOdontologia(page, tipoModalOdonto || 'Control');
@@ -687,7 +917,7 @@ async function ejecutarModulo(page, opciones, logs) {
   const tieneTabs = await page.locator('.tabset1 ul.nav-tabs li.nav-item').count() > 0;
 
   if (tieneTabs) {
-    await recorrerTabs(page, carpetaRun, modulo, run, encId, logs);
+    await recorrerTabs(page, carpetaRun, modulo, run, encId, logs, programasPYM || []);
     // Presionar "Guardar" al terminar de llenar todos los tabs
     if (cfg.rellenarCampos && cfg.presionarGuardar) {
       const { ok, exitoPath } = await presionarGuardar(page, carpetaRun);
@@ -928,6 +1158,30 @@ function generarReporteExcel(logs, carpetaBase, datos) {
     if (datos.baseUrl) base = datos.baseUrl;
   }
 
+  // ── Programas del modal PYM a activar ────────────────────────
+  const pymCfg = cfg.pym || {};
+  let programasPYM = Array.isArray(pymCfg.activar) ? [...pymCfg.activar] : [];
+
+  if (interactivo && pymCfg.preguntar && Array.isArray(pymCfg.disponibles)) {
+    const funcionales = Array.isArray(pymCfg.funcionales) ? pymCfg.funcionales : [];
+    const sel = await prompts({
+      type: 'multiselect',
+      name: 'pym',
+      message: 'Modal PYM — marca los programas a activar (espacio = marcar, Enter = confirmar)',
+      hint: '- ↑↓ moverse · espacio marcar · a marcar todos · Enter confirmar',
+      instructions: false,
+      choices: pymCfg.disponibles.map(p => ({
+        // Solo los validados se diligencian completos hoy; el resto se ofrecen igual.
+        title: funcionales.includes(p) ? p : `${p} (no validado)`,
+        value: p,
+        selected: programasPYM.includes(p),
+      })),
+    });
+    if (Array.isArray(sel.pym)) programasPYM = sel.pym;
+  }
+  log(`PYM a activar: ${programasPYM.length ? programasPYM.join(', ') : '(ninguno)'}`,
+      programasPYM.length ? 'ok' : 'info');
+
   if (cfg.bd && cfg.bd.usarBD) {
     let connStr = process.env.DB_CONNECTION || '';
 
@@ -1004,6 +1258,7 @@ function generarReporteExcel(logs, carpetaBase, datos) {
       encId:  citaId,
       pacienteId,
       citaIdInt,
+      programasPYM,
     },
   ];
 

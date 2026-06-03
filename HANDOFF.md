@@ -2,7 +2,7 @@
 
 > Documento de traspaso. Resume qué es el proyecto, cómo correrlo, cómo está
 > construido, qué decisiones se tomaron y qué falta.
-> Última actualización: 2026-06-02.
+> Última actualización: 2026-06-03.
 
 ---
 
@@ -33,7 +33,8 @@ Carpeta del proyecto: **`C:\HCHealth_RPA_Output\playwright-rpa\`**
 | `db.js` | Conexión a SQL Server (`mssql`), ejecuta el SP `agd_generar_citas`, convierte el Id de cita a base64. |
 | `ui.js` | Consola vistosa con `chalk` (colores) + `ora` (spinners): banner, `log`, spinners, caja resumen. |
 | `reporte.py` | **Generador del Excel QA** con `openpyxl`: hoja Checklist + Dashboard con gráficos + evidencias incrustadas. |
-| `config.js` | Comportamiento configurable (toggles, semillas de búsqueda, datos de reporte, BD). |
+| `config.js` | Comportamiento configurable (toggles, semillas de búsqueda, datos de reporte, BD, **programas PYM**). |
+| `recon-pym.js` | Utilidad de inspección (NO parte del flujo): abre una HC, espera el modal PYM y vuelca su estructura (controles, labels, selectores) a JSON + screenshot. Sirve para (re)mapear los programas del modal. |
 | `.env` | Credenciales de BD y PacienteId (NO se sube a git). |
 | `.env.example` | Plantilla de `.env` sin secretos. |
 | `.gitignore` | Excluye `node_modules/` y `.env`. |
@@ -92,16 +93,34 @@ node rpa.js
 ## 5. Flujo end-to-end (qué hace cada corrida)
 
 1. **Cita**: `db.js` ejecuta `EXEC agd_generar_citas @PacienteId` → devuelve `Id` (entero, ej. 464030) → `base64("464030")` = `NDY0MDMw` → URL `/HC/NDY0MDMw`.
-2. **Modal PYM**: espera que cargue (hasta el ítem "Puerperio") y da "Aceptar".
-3. **Recorre los 9 tabs** y en cada uno (orden importante):
+2. **Modal PYM** (Promoción y Mantenimiento): espera que cargue (hasta "Puerperio"),
+   **activa los programas elegidos** marcando su radio "SI" (ver `config.pym`) y da
+   "Aceptar". Activar un programa revela tabs/secciones condicionales (ej. Prenatal
+   añade el tab "Prenatal"). El modal lista 16 programas; cada uno es una fila con
+   label `.text-pym-title` + radios SI/NO. Se ubica por el texto del label y se hace
+   clic en el **label** "SI" (el `<input radio>` está oculto por el estilo `kt-radio`,
+   por eso `.check()` no sirve). Mapeado con `recon-pym.js`.
+3. **Recorre los tabs** (9 base; +1 "Prenatal" si se activó ese programa) y en cada uno:
    - Dropdowns buscables (`angular2-multiselect`) primero: escribe semilla, espera resultados, elige el primero y da **Agregar** (diagnóstico, medicamento, orden) → aparecen filas nuevas.
    - Marca la casilla **"¿Requiere incapacidad?"** → revela su sub-formulario.
    - Texto / radios por JS (rápido, sin scroll). Radios SI/NO → **NO**.
    - Números: respetan `min`/`max`; los **signos vitales** usan valores clínicos normales (T.A 120/80, temp 36, SatO2 98, peso 65, talla 165) para no disparar alertas.
    - Selects: varias pasadas (elegir uno revela otros, ej. Tipo Incapacidad → grupoServicio/modalidad).
-   - Cierra alertas emergentes (SweetAlert) automáticamente.
+   - **Clasifica las alertas (SweetAlert2) por CONTENIDO** (no por ícono — el frontend
+     muestra hasta errores de backend como `warning`):
+     - **Clínicas / validación / info** (ej. "tamización mensual con IgM", remisiones,
+       "faltan datos", cifras vitales altas) → `cerrarAlertas` las **descarta** (OK/Aceptar/
+       Cerrar) y el bot continúa.
+     - **Error de backend** (`error occurred|deserializ|exception|bsontype|no se pudo guardar`)
+       → `detectarErrorApp` lo detecta → el tab se marca **FAIL** con la captura como
+       evidencia y se cierra el modal para seguir.
+     - **Éxito** (`guardado|éxito`) → se deja abierto para `capturarExito`.
    - Audita campos que queden inválidos (`.ng-invalid`/`.obligatorio`) y avisa.
    - Captura el tab (+ `_scroll` en tabs largos).
+   - **Tabs de PYM** (revelados por programas activados, ej. Prenatal): en vez de una
+     captura única, `expandirPaneles` abre todos los paneles del acordeón y
+     `capturarPanelesPYM` toma un element screenshot de **cada panel**, registrando
+     **una fila por panel** en el reporte (toggle `config.evidenciaPanelPorPanelPYM`).
 4. **Guardar**: botón del sidebar (`guardarHistoriaClinica`) → modal "Confirmar datos del paciente" → **Enviar**. Captura el SweetAlert **"Guardado Correctamente"** (`GUARDADO_Exito.png`) como evidencia de la fila "Guardado de Historia Clínica".
 5. **Impresiones** (modal "Información"):
    - Historia Clínica → Imprimir → **Versión full** → Continuar → captura el PDF (pestaña nueva).
@@ -122,10 +141,16 @@ node rpa.js
 | `rellenarCampos` | Activa/desactiva el llenado de campos. |
 | `textoPrueba` | Texto para inputs/textareas (`PRUEBA RPA`). |
 | `semillasBusqueda` | Palabras para dropdowns buscables (diagnósticos/medicamentos/órdenes). |
+| `pym.activar` | Programas del modal PYM a marcar "SI" por defecto (ej. `['Prenatal']`). |
+| `pym.preguntar` | `true` = en modo interactivo pregunta (multiselect, muestra los 16 a la vez) cuáles activar. |
+| `pym.funcionales` | Programas validados end-to-end (ej. `['Prenatal']`); el resto sale como "(no validado)" en el prompt. |
+| `pym.disponibles` | Catálogo de los 16 programas del modal (label exacto). Opciones del prompt. |
 | `presionarGuardar` | Presiona "Guardar" al terminar. |
 | `capturarImpresiones` | Captura los PDF del modal de impresión. |
 | `cerrarNavegadorAlFinal` | `false` = deja el navegador abierto. |
 | `tabsConScroll` | Tabs que requieren una 2ª captura con scroll. |
+| `expandirPaneles` | Abre los paneles de `ngb-accordion` colapsados antes de llenar (ej. Prenatal). |
+| `evidenciaPanelPorPanelPYM` | En tabs de PYM, captura cada panel del acordeón como fila propia del reporte. |
 | `reporte.version/ambiente/moduloHeader/testerDev/clienteDefault` | Encabezado del reporte. |
 | `tiempos.*` | Esperas (timeouts) ajustables. |
 
@@ -162,9 +187,15 @@ Réplica del template QA `Listado de Pruebas HC`. Generado por `reporte.py` (ope
 
 ## 9. Estado actual
 
-✅ **Funcionando end-to-end** para **Morbilidad** con paciente adulto (PacienteId 80420).
-- Última corrida: **18 casos, 0 fallos**; 13 evidencias incrustadas (9 tabs + 4 impresiones); Dashboard con 2 gráficos.
-- Cita fresca por corrida (probado: 464026, 464027, 464029, 464030…).
+✅ **Funcionando end-to-end** para **Morbilidad** con paciente adulto (PacienteId 80420),
+incluyendo el programa **PYM Prenatal**.
+- **Modal PYM**: selección por consola (multiselect, 16 programas) y activación por clic en
+  el label "SI"; activar un programa revela su tab (Prenatal validado).
+- **Acordeones**: se expanden todos los paneles antes de llenar (`expandirPaneles`).
+- **Alertas**: clasificadas por contenido — clínicas/info se descartan, error de backend → tab FAIL.
+- **Evidencia PYM**: captura **panel por panel** (una fila por panel del acordeón).
+- Última corrida: **31 casos, 0 fallos** (incluye los 18 paneles de Prenatal + 4 impresiones).
+- Cita fresca por corrida.
 
 ---
 

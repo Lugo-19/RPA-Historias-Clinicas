@@ -1,8 +1,9 @@
 # ROADMAP — RPA HCHealth
 
-Pendientes priorizados para futuras sesiones. Estado v1.0.0: ✅ Morbilidad
-funcionando end-to-end (paciente adulto). Ver `HANDOFF.md` para el detalle del
-sistema actual.
+Pendientes priorizados para futuras sesiones. Estado: ✅ Morbilidad end-to-end
+(paciente adulto) + **programa PYM Prenatal** (selección por consola, activación,
+expansión de acordeones, clasificación de alertas y evidencia panel-por-panel).
+Ver `HANDOFF.md` para el detalle del sistema actual.
 
 ---
 
@@ -26,8 +27,43 @@ Mensaje sugerido de inicio:
 ## Prioridad MEDIA
 
 - [ ] **Perfiles de paciente** para cubrir tabs condicionales que hoy no se ven:
-  prenatal, niño <5 / AIEPI, mujer → Mama/Cérvix, crónicos (Ruta Crónicos), etc.
+  niño <5 / AIEPI, mujer → Mama/Cérvix, crónicos (Ruta Crónicos), etc.
   Hoy solo se cubre el perfil del PacienteId configurado (adulto).
+  - [x] **Modal PYM mapeado** (16 programas) y **selección previa** implementada:
+    `config.pym.activar` + prompt **multiselect** (muestra los 16 a la vez, marcar
+    varios con espacio; los no validados salen como "(no validado)" vía
+    `config.pym.funcionales`). Activar un programa revela sus tabs/secciones.
+    **Prenatal** validado: añade el tab "Prenatal" y se diligencia completo
+    (≈216 campos). Mapeo/inspección con `recon-pym.js`.
+  - [x] **Error de backend → tab FAIL:** si un tab dispara un SweetAlert de error
+    del servidor (deserialización Mongo, excepción, etc.), el RPA lo detecta
+    (`detectarErrorApp`), captura el screenshot como evidencia, marca el tab como
+    **Fallido** en el reporte y cierra el modal ("OK") para continuar.
+  - [ ] ⚠️ **Hallazgo (bug de app, intermitente):** el tab Prenatal a veces lanza un
+    error de deserialización Mongo ("Cannot deserialize a 'DateTime' from BsonType
+    'Null'" en `HC_MasterPrenatal.Consultas`). No se repite en todas las citas. El
+    RPA ya lo marca FAIL + evidencia cuando ocurre. Reportar al equipo de la app.
+  - [x] **Clasificación de alertas (SweetAlert2) por contenido** — fundamentada en el
+    código del frontend (`prenatal.component.ts`, `morbilidad/index.component.ts`):
+    clínicas/info (ej. "tamización mensual con IgM") → se descartan y se continúa;
+    error de backend → tab FAIL + evidencia; éxito → se captura. Resuelve el bloqueo
+    por el popup de tamización.
+  - [x] **Llenado 100% de Prenatal**: `expandirPaneles` (rpa.js) abre todos los paneles
+    de `ngb-accordion` colapsados (toggle `h4.titletabs`/`[ngbPanelToggle]`, con dedupe
+    para anidados) antes de llenar. Verificado: Prenatal expande **18 paneles** (Gestación,
+    3 trimestres de exámenes con Toxoplasma, Monitoreo, riesgos, Chagas…) y se diligencian
+    los campos vacíos sin bloqueo. Toggle global `config.expandirPaneles`.
+  - [x] **Evidencia panel-por-panel para tabs de PYM**: para los tabs revelados por
+    programas activados (ej. Prenatal), `capturarPanelesPYM` toma un element screenshot
+    recortado de **cada panel del acordeón** y lo registra como **una fila propia** en el
+    checklist ("Prenatal — Gestación Actual", "Prenatal — Tamizaje de Chagas", …).
+    Verificado: Prenatal genera 18 capturas/filas. Toggle `config.evidenciaPanelPorPanelPYM`.
+    Los tabs base conservan su captura única. (Nota: el header sticky puede solaparse
+    levemente arriba de cada panel; cosmético.)
+  - [ ] Probar el resto de programas PYM (Cervix, Ruta Crónicos, Vacunacion, etc.)
+    y mapear qué tab/sección revela cada uno. Nota: el modal solo muestra los programas
+    con `pacienteAplica=true` (vienen de `/api/Morbilidad/ValidarAccesoProgramas`); el
+    catálogo interno va de IDs 3–44 (`index.component.ts checkoptions()`).
 - [ ] **Parametrizar el SP/paciente por tipo de prueba** (ej. distintos PacienteId
   o SP que genere citas de perfiles distintos) para automatizar varios perfiles
   en una corrida.
